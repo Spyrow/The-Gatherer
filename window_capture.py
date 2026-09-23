@@ -1,6 +1,17 @@
 import numpy as np
 import win32gui, win32ui, win32con
 
+GAME_TITLES = ["Albion Online Client", "Albion Online", "Albion", "ALBION ONLINE CLIENT"]
+
+def get_game_rect():
+    """Return the Albion window rect (left, top, right, bottom) or None if not found."""
+    for title in GAME_TITLES:
+        hwnd = win32gui.FindWindow(None, title)
+        if hwnd:
+            return win32gui.GetWindowRect(hwnd)
+    return None
+
+
 class WindowCapture:
     
     #Properties
