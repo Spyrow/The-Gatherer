@@ -8,7 +8,7 @@ import os
 def build_model(is_cuda, path="models/custom_yolov5.onnx"):
     net = cv2.dnn.readNet(path)
     if is_cuda:
-        print("Attempty to use CUDA")
+        print("Attempt to use CUDA")
         net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
         net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA_FP16)
     else:
@@ -16,6 +16,14 @@ def build_model(is_cuda, path="models/custom_yolov5.onnx"):
         net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
         net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
     return net
+
+
+def build_models(models, is_cuda):
+    """Load several ONNX models at once. Returns {model_name: net}."""
+    nets = {}
+    for name in models:
+        nets[name] = build_model(is_cuda, f"models/{name}")
+    return nets
 
 INPUT_WIDTH = 640
 INPUT_HEIGHT = 640
@@ -95,14 +103,35 @@ def format_yolov5(frame):
 
 
 
-def results_objects(frame, net, model):
-    classes = get_classes(model)
-    class_list = load_classes(classes)
-    inputImage = format_yolov5(frame)
-    outs = detect(inputImage, net)
+def results_objects(frame, nets, models):
+    """Run detection on several models and merge the results into a single list.
 
-    class_ids, confidences, boxes = wrap_detection(inputImage, outs[0])
-    return class_ids, confidences, boxes, class_list
+    Each model contributes detections with its own class list; the class ids are
+    renumbered so the merged id indexes the flattened class_list.
+    """
+    merged_class_ids = []
+    merged_confidences = []
+    merged_boxes = []
+    class_list = []
+
+    for name in models:
+        net = nets.get(name)
+        if net is None:
+            continue
+        classes = load_classes(get_classes(name))
+        inputImage = format_yolov5(frame)
+        outs = detect(inputImage, net)
+        class_ids, confidences, boxes = wrap_detection(inputImage, outs[0])
+        if not class_ids:
+            continue
+        offset = len(class_list)
+        for cid in class_ids:
+            merged_class_ids.append(cid + offset)
+        merged_confidences.extend(confidences)
+        merged_boxes.extend(boxes)
+        class_list.extend(classes)
+
+    return merged_class_ids, merged_confidences, merged_boxes, class_list
 
 def results_frame(frame, class_ids, confidences, boxes, class_list):
     colors = [(255, 255, 0), (0, 255, 0), (0, 255, 255), (255, 0, 0)]

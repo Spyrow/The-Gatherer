@@ -158,6 +158,46 @@ class DropdownFrame(ctk.CTkFrame):
         return self.option
 
 
+class ModelsFrame(ctk.CTkFrame):
+    def __init__(self, *args, name, models, selected=None, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        selected = selected or []
+        self.label1 = ctk.CTkLabel(self, text=name, anchor="center")
+        self.label1.grid(row=0, column=0, pady=(10, 4), padx=10, sticky="n")
+
+        # "Select all / None" quick toggles for a long model list
+        all_button = ctk.CTkButton(self, text="All", width=45, command=lambda: self.set_all(True))
+        all_button.grid(row=1, column=0, padx=(4, 2), pady=(0, 4), sticky="w")
+        none_button = ctk.CTkButton(self, text="None", width=45, command=lambda: self.set_all(False))
+        none_button.grid(row=1, column=1, padx=(2, 4), pady=(0, 4), sticky="w")
+
+        self.vars = {}
+        row = 2
+        for model in models:
+            var = ctk.StringVar(value="1" if model in selected else "0")
+            ctk.CTkCheckBox(self, text=model, variable=var, onvalue="1", offvalue="0") \
+                .grid(row=row, column=0, columnspan=2, pady=1, padx=12, sticky="w")
+            self.vars[model] = var
+            row += 1
+
+        self.note = ctk.CTkLabel(self, text="Tick models, then Save changes",
+                                 text_color="gray", anchor="center")
+        self.note.grid(row=row, column=0, columnspan=2, pady=(6, 10), padx=10)
+
+    def get_selected(self):
+        return [model for model, var in self.vars.items() if var.get() == "1"]
+
+    def set_selected(self, models):
+        for model, var in self.vars.items():
+            var.set("1" if model in models else "0")
+
+    def set_all(self, state):
+        value = "1" if state else "0"
+        for var in self.vars.values():
+            var.set(value)
+
+
 class RouteFrame(ctk.CTkFrame):
     def __init__(self, *args, name, text1, text2, command_name1, command_name2,
                  clear_cmd, save_cmd, load_cmd, restart_cmd=None,

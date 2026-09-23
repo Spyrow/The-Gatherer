@@ -28,9 +28,9 @@ class App(ctk.CTk):
         super().__init__()
 
         self.models = filter_models(get_files_in_folder())
-        self.model = "rough_stone.onnx"
+        self.selected_models = []
+        self.nets = {}
         self.is_cuda = len(sys.argv) > 1 and sys.argv[1] == "cuda"
-        self.net = build_model(self.is_cuda, f"models/{self.model}")
 
         self.resolution = "1024x720"
         self.waiting_time = 3.5
@@ -45,7 +45,7 @@ class App(ctk.CTk):
         self.class_ids, self.confidences, self.boxes, self.class_list, self.centers = [], [], [], [], []
         
 
-        self.geometry("480x640")
+        self.geometry("520x780")
         self.title("The Gatherer 2.0 - Wandering Eye")
         self.iconbitmap("wanderingeye.ico")
 
@@ -67,12 +67,15 @@ class App(ctk.CTk):
             self.actions_frame.reset_values()
             self.bot_status="off"
             self.vision_status="off"
-            
-            print(self.onnx_model_box.get_option())
-            self.model = self.onnx_model_box.get_option()
-            self.net = build_model(self.is_cuda, f"models/{self.model}")          
-            print(f"Using: {self.model}")
-            
+
+            selected = self.models_frame.get_selected()
+            if not selected:
+                print("[Models] No model selected, keeping: " + (", ".join(self.selected_models) or "none"))
+            else:
+                self.selected_models = selected
+            self.nets = build_models(self.selected_models, self.is_cuda)
+            print(f"Using models: {', '.join(self.selected_models) if self.selected_models else 'none'}")
+
             self.width, self.height = self.game_size_box.get_option().split('x')
             self.wincap = WindowCapture(None, width=int(self.width), height=int(self.height))
             print(f"Game resolution: {self.width}x{self.height}")
@@ -87,7 +90,7 @@ class App(ctk.CTk):
         #Creating Objects
         self.actions_frame = SwitchesFrame(self, name="Actions", text1="Display bot's vision", text2="Gather resources", command_name1 = update_vision_status, command_name2 = update_bot_status)
         self.game_size_box = DropdownFrame(self, name="Select Window Size", text="Game resolution", default="1024x720" , options=["1024x720","1280x720", "1280x1024", "1366x768", "1600x900", "1680x1050", "1920x1080"])
-        self.onnx_model_box = DropdownFrame(self, name="Select detection model", text="Onnx model", default="rough_stone.onnx", options=self.models)
+        self.models_frame = ModelsFrame(self, name="Select detection models", models=self.models, selected=self.selected_models)
         self.update_info_button = ctk.CTkButton(self, text="Save changes", command=update_info)
         self.waiting_time_frame = SingleEntryFrame(self, header_name="EntryFrame1", name="Waiting Time", text="3.5", default=3.5)
         self.route_frame = RouteFrame(self, name="Route", text1="Record route", text2="Follow route",
@@ -101,9 +104,9 @@ class App(ctk.CTk):
         self.actions_frame.grid(row=0, column=0, pady=12, padx=10)
         self.waiting_time_frame.grid(row=1, column=0, pady=12, padx=10)
         self.game_size_box.grid(row=0, column=1, pady=12, padx=10)
-        self.onnx_model_box.grid(row=1, column=1, pady=12, padx=10)
-        self.update_info_button.grid(row=2, column=0, padx=20, pady=10)
-        self.route_frame.grid(row=3, column=0, columnspan=2, pady=12, padx=10)
+        self.models_frame.grid(row=1, column=1, rowspan=2, pady=12, padx=10, sticky="n")
+        self.update_info_button.grid(row=3, column=0, padx=20, pady=10)
+        self.route_frame.grid(row=4, column=0, columnspan=2, pady=12, padx=10)
 
         self.marker = ScreenMarker(0, 0, self.winfo_screenwidth(), self.winfo_screenheight())
         self.hotkeys = GlobalHotkeys()
@@ -148,7 +151,7 @@ class App(ctk.CTk):
         return os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
 
     def save_settings(self):
-        data = {"model": self.model,
+        data = {"models": self.selected_models,
                 "resolution": f"{self.width}x{self.height}",
                 "waiting_time": self.waiting_time}
         try:
@@ -169,12 +172,15 @@ class App(ctk.CTk):
             print("Load settings error:", e)
             return
 
-        model = data.get("model")
-        if model in self.models:
-            self.model = model
-            self.onnx_model_box.combobox_var.set(model)
-            self.onnx_model_box.option = model
-            self.net = build_model(self.is_cuda, f"models/{model}")
+        models = data.get("models")
+        if not models and data.get("model"):
+            models = [data["model"]]
+        if models:
+            valid = [m for m in models if m in self.models]
+            if valid:
+                self.selected_models = valid
+                self.models_frame.set_selected(valid)
+                self.nets = build_models(self.selected_models, self.is_cuda)
 
         resolution = data.get("resolution")
         if resolution in ["1024x720", "1280x720", "1280x1024", "1366x768", "1600x900", "1680x1050", "1920x1080"]:
@@ -190,7 +196,7 @@ class App(ctk.CTk):
             self.waiting_time_frame.entry.delete(0, "end")
             self.waiting_time_frame.entry.insert(0, str(data["waiting_time"]))
 
-        print(f"[Settings] Loaded: model={self.model}, resolution={self.resolution}, wait={self.waiting_time}")
+        print(f"[Settings] Loaded: models={self.selected_models}, resolution={self.resolution}, wait={self.waiting_time}")
 
     def set_record(self):
         if self.route_frame.get_state1() == "on":
@@ -319,7 +325,7 @@ class App(ctk.CTk):
         #Avoid running inference if there are no actions activated
         if(self.vision_status == "on" or self.bot_status =="on"):
             self.screenshot = self.wincap.get_screenshot()
-            self.class_ids, self.confidences, self.boxes, self.class_list = results_objects(self.screenshot, self.net, self.model)
+            self.class_ids, self.confidences, self.boxes, self.class_list = results_objects(self.screenshot, self.nets, self.selected_models)
             self.centers = get_center(self.boxes)
             self.frame = results_frame(self.screenshot, self.class_ids, self.confidences, self.boxes, self.class_list)
         
